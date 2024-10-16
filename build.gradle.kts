@@ -54,14 +54,14 @@ publishing {
     publications {
         create<MavenPublication>("mavenGitCommit") {
             groupId = "net.mangolise"
-            artifactId = "oitc"
+            artifactId = "duels"
             version = versionStr
             from(components["java"])
         }
 
         create<MavenPublication>("mavenLatest") {
             groupId = "net.mangolise"
-            artifactId = "oitc"
+            artifactId = "duels"
             version = "latest"
             from(components["java"])
         }
@@ -71,6 +71,6 @@ publishing {
 tasks.withType<Jar> {
     manifest {
         // Change this to your main class
-        attributes["Main-Class"] = "net.mangolise.paintball.Test"
+        attributes["Main-Class"] = "net.mangolise.duels.Test"
     }
 }
