@@ -5,7 +5,7 @@ import net.kyori.adventure.text.Component;
 import net.kyori.adventure.title.Title;
 import net.mangolise.combat.events.PlayerAttackEvent;
 import net.mangolise.combat.events.PlayerKilledEvent;
-import net.mangolise.gamesdk.BaseGame;
+import net.mangolise.gamesdk.log.Log;
 import net.mangolise.gamesdk.util.ChatUtil;
 import net.mangolise.gamesdk.util.GameSdkUtils;
 import net.mangolise.gamesdk.util.Timer;
@@ -21,44 +21,56 @@ import net.minestom.server.timer.TaskSchedule;
 
 import java.time.Duration;
 import java.time.temporal.ChronoUnit;
+import java.util.ArrayList;
 import java.util.List;
+import java.util.Objects;
 import java.util.concurrent.CompletableFuture;
+import java.util.function.Consumer;
 
-public class Duel extends BaseGame<Duel.Config> {
+public class Duel {
     private static final int GAME_END_WAIT_MS = 5000;
-    private final CompletableFuture<Player> gameFinished = new CompletableFuture<>();
+    private final CompletableFuture<List<Player>> gameFinished = new CompletableFuture<>();
     private Instance world;
     private boolean inCombat = false;
+    private List<Team> remainingTeams;
+    private final Config config;
 
     protected Duel(Config config) {
-        super(config);
-        if (config.players.size() != 2) {
-            throw new IllegalArgumentException("Config must contain 2 players exactly.");
-        }
+        this.config = config;
     }
 
-    @Override
-    public List<Feature<?>> features() {
-        return List.of();
+    private void forEachPlayer(Consumer<Player> consumer) {
+        config.teams.forEach(t -> t.forEach(consumer));
     }
 
-    @Override
     public void setup() {
-        super.setup();
+        remainingTeams = new ArrayList<>();
+        config.teams.forEach(tpl -> {
+            remainingTeams.add(new Team(tpl));
 
-        world = MinecraftServer.getInstanceManager().createInstanceContainer(GameSdkUtils.getPolarLoaderFromResource("worlds/fruit.polar"));
+            if (tpl.size() > 1) {
+                tpl.forEach(p -> p.sendMessage(ChatUtil.toComponent("&aYou are teamed with: &6" + String.join(", ",
+                        tpl
+                                .stream()
+                                .filter(p2 -> !p2.equals(p))
+                                .map(Player::getUsername).toList()))));
+            }
+        });
+
+        world = MinecraftServer.getInstanceManager().createInstanceContainer(GameSdkUtils.getPolarLoaderFromResource("worlds/" + config.map + ".polar"));
         world.enableAutoChunkLoad(true);
 
         world.loadChunk(new Vec(0, 0, 0)).join();
         Pos pos = GameSdkUtils.getSpawnPosition(world);
-        config.players.forEach(p -> {
+        forEachPlayer(p -> {
             p.setInstance(world, pos);
             p.setRespawnPoint(pos);
-            p.setGameMode(GameMode.SURVIVAL);
+            p.setGameMode(config.variant().gameMode());
+            config.variant.kit().forEach((key, value) -> p.getInventory().setItemStack(key, value));
         });
 
         Timer.countDown(5, 20, time -> {
-                    config.players.forEach(p -> {
+                    forEachPlayer(p -> {
                         p.playSound(Sound.sound(SoundEvent.ENTITY_WARDEN_HEARTBEAT, Sound.Source.MASTER, 1f, 1f));
                         p.showTitle(Title.title(
                                 Component.text(""),
@@ -66,9 +78,7 @@ public class Duel extends BaseGame<Duel.Config> {
                                 Title.Times.times(Duration.ZERO, Duration.of(1, ChronoUnit.SECONDS), Duration.ZERO)));
                     });
                 }).thenAccept(ignored -> {  // Timer done
-                    config.players.forEach(p -> {
-                        p.playSound(Sound.sound(SoundEvent.ENTITY_WITHER_SPAWN, Sound.Source.MASTER, 0.5f, 1f));
-                    });
+                    forEachPlayer(p -> p.playSound(Sound.sound(SoundEvent.ENTITY_WITHER_SPAWN, Sound.Source.MASTER, 0.5f, 1f)));
                     inCombat = true;
                 });
 
@@ -87,7 +97,18 @@ public class Duel extends BaseGame<Duel.Config> {
 
         if (!inCombat) {
             e.setCancelled(true);
-            return;
+        }
+
+        if (config.teams.stream().anyMatch(team -> team.contains(e.attacker()) && team.contains(e.victim()))) {
+            e.setCancelled(true);
+        }
+
+        if (!config.variant.attackingEnabled()) {
+            e.setCancelled(true);
+        }
+
+        if (!config.variant.damageEnabled()) {
+            e.setDamage(0);
         }
     }
 
@@ -97,36 +118,62 @@ public class Duel extends BaseGame<Duel.Config> {
         }
 
         e.victim().setGameMode(GameMode.SPECTATOR);
+        Component killerName = e.killer() == null ? ChatUtil.toComponent("&7poor decision making") : ChatUtil.getDisplayName(Objects.requireNonNull(e.killer()));
+        e.setDeathMsg(ChatUtil.getDisplayName(e.victim()).append(ChatUtil.toComponent(" &7was killed by ").append(killerName)));
 
-        Player winner = null;
-        for (Player player : config().players) {
-            if (player.equals(e.victim())) {
-                if (!player.isOnline()) {
-                    continue;
-                }
-                player.showTitle(Title.title(ChatUtil.toComponent("&cYou lose"), Component.text("")));
-                MinecraftServer.getSchedulerManager().scheduleNextTick(() -> {
-                    player.playSound(Sound.sound(SoundEvent.ENTITY_BLAZE_DEATH, Sound.Source.MASTER, 0.3f, 1f));
-                });
+        for (Team team : remainingTeams) {
+            if (!team.removeAlive(e.victim())) {
                 continue;
             }
 
-            // player is the killer, they won
-            winner = player;
-            player.showTitle(Title.title(ChatUtil.toComponent("&aYou Win!"), Component.text("")));
-            player.playSound(Sound.sound(SoundEvent.ENTITY_PLAYER_LEVELUP, Sound.Source.MASTER, 0.7f, 1f));
+            // Team is eliminated
+            team.members().forEach(p -> p.sendMessage(ChatUtil.toComponent("&cYour team has been eliminated!")));
+            remainingTeams.remove(team);
+            if (remainingTeams.size() == 1) {
+                gameEnd();
+            }
+            break;
         }
 
-        final Player finalWinner = winner;
+        Log.logger().info("Remaining teams: {}", remainingTeams.size());
+    }
+
+    private void gameEnd() {
+        if (remainingTeams.size() != 1) {
+            throw new IllegalStateException("There isn't one team left, remove all dead teams first");
+        }
+
+        Team winningTeam = remainingTeams.getFirst();
+
+        forEachPlayer(player -> {
+            if (winningTeam.members().contains(player)) {  // dub
+                if (!player.isOnline()) {
+                    return;
+                }
+                player.showTitle(Title.title(ChatUtil.toComponent("&aYou Win!"), Component.text("")));
+                player.playSound(Sound.sound(SoundEvent.ENTITY_PLAYER_LEVELUP, Sound.Source.MASTER, 0.7f, 1f));
+                return;
+            }
+            // L
+
+            if (!player.isOnline()) {
+                return;
+            }
+            player.showTitle(Title.title(ChatUtil.toComponent("&cYou lose"), Component.text("")));
+            MinecraftServer.getSchedulerManager().scheduleNextTick(() -> {
+                player.playSound(Sound.sound(SoundEvent.ENTITY_BLAZE_DEATH, Sound.Source.MASTER, 0.3f, 1f));
+            });
+        });
+
         MinecraftServer.getSchedulerManager().scheduleTask(
-                () -> onGameFinished().complete(finalWinner),
+                () -> onGameFinished().complete(winningTeam.members()),
                 TaskSchedule.millis(GAME_END_WAIT_MS),
                 TaskSchedule.stop());
     }
 
-    public CompletableFuture<Player> onGameFinished() {
+    public CompletableFuture<List<Player>> onGameFinished() {
         return gameFinished;
     }
 
-    public record Config(List<Player> players) { }
+    public record Config(List<List<Player>> teams, Variant variant, String map) { }
 }
