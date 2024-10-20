@@ -34,4 +34,19 @@ public class ClassicVariant implements Variant {
     public boolean attackingEnabled() {
         return true;
     }
+
+    @Override
+    public boolean allowArenaBreak() {
+        return false;
+    }
+
+    @Override
+    public int blockDisappearTime() {
+        return -1;
+    }
+
+    @Override
+    public int arenaHeight() {
+        return 255;
+    }
 }

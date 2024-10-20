@@ -10,14 +10,27 @@ import net.mangolise.gamesdk.util.ChatUtil;
 import net.mangolise.gamesdk.util.GameSdkUtils;
 import net.mangolise.gamesdk.util.Timer;
 import net.minestom.server.MinecraftServer;
+import net.minestom.server.coordinate.BlockVec;
 import net.minestom.server.coordinate.Pos;
 import net.minestom.server.coordinate.Vec;
 import net.minestom.server.entity.GameMode;
 import net.minestom.server.entity.Player;
+import net.minestom.server.entity.damage.Damage;
+import net.minestom.server.entity.damage.DamageType;
+import net.minestom.server.event.EventListener;
+import net.minestom.server.event.instance.InstanceTickEvent;
+import net.minestom.server.event.player.PlayerBlockBreakEvent;
+import net.minestom.server.event.player.PlayerBlockPlaceEvent;
 import net.minestom.server.event.player.PlayerDisconnectEvent;
+import net.minestom.server.event.player.PlayerMoveEvent;
 import net.minestom.server.instance.Instance;
+import net.minestom.server.instance.block.Block;
+import net.minestom.server.item.ItemStack;
+import net.minestom.server.network.packet.server.play.BlockBreakAnimationPacket;
 import net.minestom.server.sound.SoundEvent;
+import net.minestom.server.tag.Tag;
 import net.minestom.server.timer.TaskSchedule;
+import org.jetbrains.annotations.NotNull;
 
 import java.time.Duration;
 import java.time.temporal.ChronoUnit;
@@ -25,10 +38,14 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ThreadLocalRandom;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
 
 public class Duel {
     private static final int GAME_END_WAIT_MS = 5000;
+    private static final int OUT_OF_BOUNDS_TIME = 5;
+    private static final Tag<Long> LAST_IN_BOUNDS_TAG = Tag.Long("duels_last_in_bounds");
     private final CompletableFuture<List<Player>> gameFinished = new CompletableFuture<>();
     private Instance world;
     private boolean inCombat = false;
@@ -88,6 +105,78 @@ public class Duel {
             PlayerKilledEvent death = new PlayerKilledEvent(e.getPlayer(), null, null, null, null);
             onKill(death);
         });
+        world.eventNode().addListener(PlayerBlockBreakEvent.class, this::onBlockBreak);
+        world.eventNode().addListener(PlayerBlockPlaceEvent.class, this::onBlockPlace);
+        world.eventNode().addListener(PlayerMoveEvent.class, this::onMove);
+        world.eventNode().addListener(InstanceTickEvent.class, this::onTick);
+    }
+
+    private void onTick(@NotNull InstanceTickEvent event) {
+        if (event.getInstance().getWorldAge() % 20 != 0) {
+            return;
+        }
+
+        for (Player player : event.getInstance().getPlayers()) {
+            if (player.getGameMode() == GameMode.SPECTATOR) {
+                continue;
+            }
+
+            if (player.getPosition().y() <= config.variant.arenaHeight()) continue;
+
+            player.showTitle(Title.title(
+                    ChatUtil.toComponent("&cGo back to the arena"),
+                    ChatUtil.toComponent("&6You will begin taking damage"),
+                    Title.Times.times(Duration.ZERO, Duration.ofMillis(1100), Duration.ofMillis(200))));
+
+            if (!player.hasTag(LAST_IN_BOUNDS_TAG)) continue;
+            if (System.currentTimeMillis() - player.getTag(LAST_IN_BOUNDS_TAG) > OUT_OF_BOUNDS_TIME * 1000) {
+                player.damage(new Damage(DamageType.OUT_OF_WORLD, null, null, null, 2f));
+            }
+        }
+    }
+
+    private void onMove(@NotNull PlayerMoveEvent event) {
+        if (event.getPlayer().getPosition().y() <= config.variant.arenaHeight()) {
+            event.getPlayer().setTag(LAST_IN_BOUNDS_TAG, System.currentTimeMillis());
+        }
+    }
+
+    private void onBlockPlace(@NotNull PlayerBlockPlaceEvent event) {
+        if (config.variant.blockDisappearTime() == -1) {
+            return;
+        }
+
+        final int breakerId = ThreadLocalRandom.current().nextInt(400, 9999);
+        final BlockVec pos = event.getBlockPosition();
+        final CompletableFuture<Void> cancel = Timer.countDown(config.variant.blockDisappearTime(), 20, i -> {
+            int stage = 9 - (int) (((double) i / config.variant.blockDisappearTime()) * 9.0);
+            BlockBreakAnimationPacket breakPacket = new BlockBreakAnimationPacket(breakerId, event.getBlockPosition(), (byte) stage);
+            world.sendGroupedPacket(breakPacket);
+        }).thenAccept(v -> {
+            event.getInstance().setBlock(pos, Block.AIR);
+            event.getInstance().playSound(Sound.sound(SoundEvent.BLOCK_STONE_BREAK, Sound.Source.BLOCK, 0.4f, 1f));
+            BlockBreakAnimationPacket breakPacket = new BlockBreakAnimationPacket(breakerId, event.getBlockPosition(), (byte) 0);
+            world.sendGroupedPacket(breakPacket);
+            event.getPlayer().getInventory().addItemStack(ItemStack.of(Objects.requireNonNull(event.getBlock().registry().material())));
+        });
+
+        AtomicReference<EventListener<PlayerBlockBreakEvent>> breakListen = new AtomicReference<>(null);
+
+        final BlockVec blockPos = event.getBlockPosition();
+        breakListen.set(EventListener.of(PlayerBlockBreakEvent.class, e -> {
+            if (!blockPos.sameBlock(e.getBlockPosition())) {
+                return;
+            }
+
+            cancel.complete(null);
+            event.getPlayer().getInstance().eventNode().removeListener(breakListen.get());
+        }));
+
+        event.getPlayer().getInstance().eventNode().addListener(breakListen.get());
+    }
+
+    private void onBlockBreak(@NotNull PlayerBlockBreakEvent event) {
+        if (!config.variant.allowArenaBreak()) event.setCancelled(true);
     }
 
     private void onAttack(PlayerAttackEvent e) {
@@ -118,6 +207,8 @@ public class Duel {
         }
 
         e.victim().setGameMode(GameMode.SPECTATOR);
+        e.victim().setInvisible(true);
+
         Component killerName = e.killer() == null ? ChatUtil.toComponent("&7poor decision making") : ChatUtil.getDisplayName(Objects.requireNonNull(e.killer()));
         e.setDeathMsg(ChatUtil.getDisplayName(e.victim()).append(ChatUtil.toComponent(" &7was killed by ").append(killerName)));
 

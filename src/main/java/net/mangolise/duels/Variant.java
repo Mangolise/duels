@@ -10,4 +10,7 @@ public interface Variant {
     Map<Integer, ItemStack> kit();
     boolean damageEnabled();
     boolean attackingEnabled();
+    boolean allowArenaBreak();
+    int blockDisappearTime();  // ms
+    int arenaHeight();
 }
