@@ -9,7 +9,7 @@ import java.util.List;
 
 public class DuelsGame extends BaseGame<DuelsGame.Config> {
 
-    protected DuelsGame(Config config) {
+    public DuelsGame(Config config) {
         super(config);
     }
 

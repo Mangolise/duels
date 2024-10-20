@@ -13,7 +13,7 @@ import net.minestom.server.permission.Permission;
 import java.util.*;
 
 public class Test {
-    private static final int TEAMS = 3;
+    private static final int TEAMS = 2;
     private static final int TEAM_SIZE = 1;
 
     public static void main(String[] args) {
