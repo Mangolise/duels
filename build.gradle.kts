@@ -21,7 +21,7 @@ java {
 
 dependencies {
     implementation("net.mangolise:mango-game-sdk:latest")
-    implementation("net.mangolise:mango-combat:dev")
+    implementation("net.mangolise:mango-combat:latest")
     implementation("net.minestom:minestom-snapshots:4fe2993057")
     testImplementation(platform("org.junit:junit-bom:5.10.0"))
     testImplementation("org.junit.jupiter:junit-jupiter")
