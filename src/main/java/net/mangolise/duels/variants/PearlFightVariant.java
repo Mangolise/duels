@@ -1,8 +1,8 @@
 package net.mangolise.duels.variants;
 
 import net.mangolise.duels.Variant;
+import net.minestom.server.component.DataComponents;
 import net.minestom.server.entity.GameMode;
-import net.minestom.server.item.ItemComponent;
 import net.minestom.server.item.ItemStack;
 import net.minestom.server.item.Material;
 import net.minestom.server.item.component.EnchantmentList;
@@ -20,7 +20,7 @@ public class PearlFightVariant implements Variant {
     @Override
     public Map<Integer, ItemStack> kit() {
         return Map.of(
-                0, ItemStack.of(Material.STICK, 1).with(ItemComponent.ENCHANTMENTS, new EnchantmentList(Enchantment.KNOCKBACK, 2)),
+                0, ItemStack.of(Material.STICK, 1).with(DataComponents.ENCHANTMENTS, new EnchantmentList(Enchantment.KNOCKBACK, 2)),
                 4, ItemStack.of(Material.STONE, 16),
                 8, ItemStack.of(Material.ENDER_PEARL, 8)
         );
