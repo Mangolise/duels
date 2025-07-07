@@ -22,7 +22,7 @@ java {
 dependencies {
     implementation("net.mangolise:mango-game-sdk:latest")
     implementation("net.mangolise:mango-combat:latest")
-    implementation("net.minestom:minestom-snapshots:d0754f2a15")
+    implementation("net.minestom:minestom:2025.07.03-1.21.5")
     testImplementation(platform("org.junit:junit-bom:5.10.0"))
     testImplementation("org.junit.jupiter:junit-jupiter")
 }

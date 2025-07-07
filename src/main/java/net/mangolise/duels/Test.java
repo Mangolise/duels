@@ -1,14 +1,16 @@
 package net.mangolise.duels;
 
+import net.mangolise.duels.variants.ClassicVariant;
 import net.mangolise.duels.variants.PearlFightVariant;
+import net.mangolise.duels.variants.SumoVariant;
 import net.mangolise.gamesdk.limbo.Limbo;
 import net.mangolise.gamesdk.log.Log;
+import net.mangolise.gamesdk.permissions.Permissions;
 import net.mangolise.gamesdk.util.GameSdkUtils;
 import net.minestom.server.MinecraftServer;
 import net.minestom.server.entity.Player;
 import net.minestom.server.event.player.AsyncPlayerConfigurationEvent;
 import net.minestom.server.extras.bungee.BungeeCordProxy;
-import net.minestom.server.permission.Permission;
 
 import java.util.*;
 
@@ -18,7 +20,6 @@ public class Test {
 
     public static void main(String[] args) {
         MinecraftServer server = MinecraftServer.init();
-        MinecraftServer.getConnectionManager().setUuidProvider((connection, username) -> GameSdkUtils.createFakeUUID(username));
 
         if (GameSdkUtils.useBungeeCord()) {
             BungeeCordProxy.enable();
@@ -31,7 +32,7 @@ public class Test {
 
         // give every permission to every player
         MinecraftServer.getGlobalEventHandler().addListener(AsyncPlayerConfigurationEvent.class, e ->
-                e.getPlayer().addPermission(new Permission("*")));
+                Permissions.hasPermission(e.getPlayer(), "*"));
 
         server.start("0.0.0.0", GameSdkUtils.getConfiguredPort());
     }
